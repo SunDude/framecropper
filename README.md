@@ -3,6 +3,7 @@ python quick crop tool
 
 Requirements
  - Qt5
+ - OpenCV
  - Python 3.10
  - Mouse with left click and scroll wheel
 
