@@ -24,7 +24,7 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
     
     def setupUI(self):
         self.setObjectName("leftform")
-        self.setGeometry(QtCore.QRect(0, 0, 250, 1024))
+        self.setGeometry(QtCore.QRect(0, 0, 250, 600))
 
         self.settings = QtWidgets.QFormLayout()
 
@@ -48,6 +48,7 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.sliderLabel.setText("Image Zoom")
         self.nav.addRow(self.sliderLabel)
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setPageStep(0)
         self.slider.setMinimum(0)
         self.slider.setMaximum(200)
         self.slider.setValue(1)
@@ -255,14 +256,14 @@ class uiMainWindow(QtCore.QObject):
 
         self.leftForm = LeftToolBox()
         self.leftForm.setupUI()
-        self.leftForm.slider.valueChanged.connect(self.changeZoom)
+        self.leftForm.slider.sliderMoved.connect(self.changeZoom)
         self.leftForm.prev.clicked.connect(self.prevImg)
         self.leftForm.next.clicked.connect(self.nextImg)
         self.leftForm.resetCrop.clicked.connect(self.resetCropscale)
 
         self.centralLayout.addLayout(self.leftForm, stretch=0)
         self.centralLayout.addWidget(self.photo, stretch=1)
-        #self.centralLayout.addStretch(1)
+        self.centralLayout.addStretch(1)
 
         ## MENU BAR
         self.menubar = QtWidgets.QMenuBar(MainWindow)
@@ -330,6 +331,7 @@ class uiMainWindow(QtCore.QObject):
     def changeZoom(self):
         self.photo.ratio = self.leftForm.slider.value() / 100.0
         self.updateCropBox()
+        
         self.mainWindow.resize(self.mainWindow.sizeHint())
 
 
