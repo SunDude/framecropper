@@ -2,6 +2,8 @@ import sys
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+import cv2
+
 class OnlyInt(QtGui.QIntValidator):
     def __init__(self):
         super().__init__()
@@ -22,10 +24,9 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
     
     def setupUI(self):
         self.setObjectName("leftform")
-        self.setGeometry(QtCore.QRect(0, 0, 256, 1024))
+        self.setGeometry(QtCore.QRect(0, 0, 250, 1024))
 
         self.settings = QtWidgets.QFormLayout()
-        self.addLayout(self.settings)
 
         self.outwidth = QtWidgets.QLineEdit()
         self.outwidth.setValidator(OnlyInt.setup(OnlyInt()))
@@ -37,11 +38,22 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.settings.addRow("Height:",self.outheight)
 
         self.nav = QtWidgets.QFormLayout()
-        self.addLayout(self.nav)
+        self.nav.setAlignment(QtCore.Qt.AlignTop)
 
         self.imgidxtext = QtWidgets.QLabel()
         self.imgidxtext.setText(str(self.idx) + " / " + str(self.len))
         self.nav.addRow(self.imgidxtext)
+
+        self.sliderLabel = QtWidgets.QLabel()
+        self.sliderLabel.setText("Image Zoom")
+        self.nav.addRow(self.sliderLabel)
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(200)
+        self.slider.setValue(1)
+        self.slider.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        self.slider.setTickInterval(25)
+        self.nav.addRow(self.slider)
 
         self.prev = QtWidgets.QPushButton()
         self.prev.setText("Prev")
@@ -51,6 +63,10 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.resetCrop = QtWidgets.QPushButton()
         self.resetCrop.setText("Reset Crop")
         self.nav.addRow(self.resetCrop)
+
+        self.addLayout(self.settings,0)
+        self.addLayout(self.nav, 0)
+        self.addStretch(1)
     
 
 class PhotoWidget(QtWidgets.QLabel):
@@ -74,14 +90,17 @@ class PhotoWidget(QtWidgets.QLabel):
     def displayPixmap(self, pmap):
         self.setPixmap(pmap)
         self.pixmapShow = pmap
-        self.ratio = self.pixmapShow.width() / self.pixmapImg.width()
 
     def displayImg(self, imgPath):
+        # using filepath scale image to window size and display it, record ratio of scaling
         self.pixmapImg = QtGui.QPixmap(imgPath)
-        self.pixmapShow = self.pixmapImg.scaled (self.width(), self.height(), QtCore.Qt.KeepAspectRatio)
+        self.pixmapShow = self.pixmapImg.copy()
+        self.pixmapShow = self.pixmapShow.scaled (self.width(), self.height(), QtCore.Qt.KeepAspectRatio)
+        self.ratio = self.pixmapShow.width() / self.pixmapImg.width()
         self.displayPixmap(self.pixmapShow)
 
     def updateCropBox(self, bw, bh, color = QtGui.QColor("green")):
+        # add cropping box to photo, photo is scaled to recorded ratio
         if (self.pixmapImg):
             pixmapNew = self.pixmapImg.copy()
             if pixmapNew:
@@ -100,11 +119,12 @@ class PhotoWidget(QtWidgets.QLabel):
                 painter.setPen(QtGui.QPen(color,8.0))
                 painter.drawRect(scaledrect)
                 self.baserect = scaledrect
-                self.pixmapShow = pixmapNew.scaled (self.width(), self.height(), QtCore.Qt.KeepAspectRatio)
+                self.pixmapShow = pixmapNew.scaled (round(pixmapNew.width()*self.ratio), round(pixmapNew.height()*self.ratio), QtCore.Qt.KeepAspectRatio)
                 painter.end()
             self.displayPixmap(self.pixmapShow)
 
     def saveCrop(self, bw, bh, fn):
+        # crop is extracted and resized to dimension then saved
         if self.baserect:
             fileName = "out/" + str(fn) + ".png"
 
@@ -125,15 +145,20 @@ class PhotoWidget(QtWidgets.QLabel):
             newRect.moveTopLeft(newRect.topLeft() + QtCore.QPoint(w, h))
 
             pixmapCropped = pixmapTrans.copy(newRect)
-            pixmapCropped = pixmapCropped.scaled(bw, bh) # TODO better scaling?
+            # pixmapCropped = pixmapCropped.scaled(bw, bh) # TODO better scaling?
             pixmapCropped.save(fileName, "PNG")
+
+            # reopen file to scale with opencv
+            img = cv2.imread(fileName)
+            resized = cv2.resize(img, (bw, bh))
+            cv2.imwrite(fileName, resized)
 
     def setMousePressEvent(self, newpMPE):
         self.pMPE = newpMPE
 
     def mousePressEvent(self, event):
         curpos = self.mapFromGlobal(QtGui.QCursor.pos())
-        if self.pixmapShow.rect().intersects(QtCore.QRect(curpos, curpos)):
+        if self.pixmapShow and self.pixmapShow.rect().intersects(QtCore.QRect(curpos, curpos)):
             if (self.pMPE):
                 self.pMPE(event)
         return super().mousePressEvent(event)
@@ -159,9 +184,11 @@ class uiMainWindow(QtCore.QObject):
 
     def __init__(self):
         super(uiMainWindow,self).__init__()
+        self.selectedFiles = 0
 
         self.photo = PhotoWidget()
         self.photo.setGeometry(QtCore.QRect(0, 0, 1250, 900))
+        self.photo.setAlignment(QtCore.Qt.AlignTop)
         self.photo.setText("")
         self.photo.setScaledContents(False)
         self.photo.setObjectName("photo")
@@ -194,6 +221,7 @@ class uiMainWindow(QtCore.QObject):
     def displayImg(self):
         if (self.selectedFiles and self.curImgIdx >= 0 and self.curImgIdx <= len(self.selectedFiles)):
             self.photo.displayImg(self.selectedFiles[self.curImgIdx])
+            self.leftForm.slider.setValue(round(self.photo.ratio * 100))
 
     def resetCropscale(self):
         self.photo.resetCropscale()
@@ -227,12 +255,14 @@ class uiMainWindow(QtCore.QObject):
 
         self.leftForm = LeftToolBox()
         self.leftForm.setupUI()
+        self.leftForm.slider.valueChanged.connect(self.changeZoom)
         self.leftForm.prev.clicked.connect(self.prevImg)
         self.leftForm.next.clicked.connect(self.nextImg)
         self.leftForm.resetCrop.clicked.connect(self.resetCropscale)
 
-        self.centralLayout.addLayout(self.leftForm)
+        self.centralLayout.addLayout(self.leftForm, stretch=0)
         self.centralLayout.addWidget(self.photo, stretch=1)
+        #self.centralLayout.addStretch(1)
 
         ## MENU BAR
         self.menubar = QtWidgets.QMenuBar(MainWindow)
@@ -297,6 +327,10 @@ class uiMainWindow(QtCore.QObject):
             self.displayImg()
             self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
 
+    def changeZoom(self):
+        self.photo.ratio = self.leftForm.slider.value() / 100.0
+        self.updateCropBox()
+        self.mainWindow.resize(self.mainWindow.sizeHint())
 
 
 if __name__ == "__main__":
