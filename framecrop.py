@@ -1,4 +1,5 @@
 import sys
+import os
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -128,6 +129,8 @@ class PhotoWidget(QtWidgets.QLabel):
         # crop is extracted and resized to dimension then saved
         if self.baserect:
             fileName = "out/" + str(fn) + ".png"
+            if not os.path.exists("out"):
+                os.makedirs("out")
 
             # copy self.pixmapImg to canvas with border first
 
