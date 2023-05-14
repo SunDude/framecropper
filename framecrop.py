@@ -1,7 +1,10 @@
 import sys
 import os
+import rawpy
+import imageio
 
 from PyQt5 import QtCore, QtGui, QtWidgets
+import numpy as np
 
 import cv2
 
@@ -28,14 +31,15 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.setGeometry(QtCore.QRect(0, 0, 250, 600))
 
         self.settings = QtWidgets.QFormLayout()
+        self.settings.setAlignment(QtCore.Qt.AlignTop)
 
         self.outwidth = QtWidgets.QLineEdit()
         self.outwidth.setValidator(OnlyInt.setup(OnlyInt()))
-        self.outwidth.setText("512")
+        self.outwidth.setText("640")
         self.settings.addRow("Width: ", self.outwidth)
         self.outheight = QtWidgets.QLineEdit()
         self.outheight.setValidator(OnlyInt.setup(OnlyInt()))
-        self.outheight.setText("512")
+        self.outheight.setText("480")
         self.settings.addRow("Height:",self.outheight)
 
         self.nav = QtWidgets.QFormLayout()
@@ -64,12 +68,18 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.nav.addRow(self.prev, self.next)
         self.resetCrop = QtWidgets.QPushButton()
         self.resetCrop.setText("Reset Crop")
-        self.nav.addRow(self.resetCrop)
+        self.checkClickNext = QtWidgets.QCheckBox()
+        self.checkClickNext.setText("Click -> Next")
+        self.checkClickNext.setCheckState(2)
+        self.nav.addRow(self.resetCrop, self.checkClickNext)
+
+        self.gallery = QtWidgets.QFormLayout()
+        self.nav.setAlignment(QtCore.Qt.AlignTop)
 
         self.addLayout(self.settings,0)
         self.addLayout(self.nav, 0)
+        self.addLayout(self.gallery, 0)
         self.addStretch(1)
-    
 
 class PhotoWidget(QtWidgets.QLabel):
 
@@ -89,17 +99,17 @@ class PhotoWidget(QtWidgets.QLabel):
     def resetCropscale(self):
         self.cropscale = 1.0
 
-    def displayPixmap(self, pmap):
+    def redisplayPixmap(self, pmap):
         self.setPixmap(pmap)
         self.pixmapShow = pmap
 
-    def displayImg(self, imgPath):
+    def displayPixmap(self, pixmap):
         # using filepath scale image to window size and display it, record ratio of scaling
-        self.pixmapImg = QtGui.QPixmap(imgPath)
-        self.pixmapShow = self.pixmapImg.copy()
-        self.pixmapShow = self.pixmapShow.scaled (self.width(), self.height(), QtCore.Qt.KeepAspectRatio)
-        self.ratio = self.pixmapShow.width() / self.pixmapImg.width()
-        self.displayPixmap(self.pixmapShow)
+        self.pixmapImg = pixmap.copy()
+        newPixmapShow = self.pixmapImg.copy()
+        newPixmapShow = newPixmapShow.scaled (self.width(), self.height(), QtCore.Qt.KeepAspectRatio)
+        self.ratio = newPixmapShow.width() / self.pixmapImg.width()
+        self.redisplayPixmap(newPixmapShow)
 
     def updateCropBox(self, bw, bh, color = QtGui.QColor("green")):
         # add cropping box to photo, photo is scaled to recorded ratio
@@ -107,26 +117,40 @@ class PhotoWidget(QtWidgets.QLabel):
             pixmapNew = self.pixmapImg.copy()
             if pixmapNew:
                 painter = QtGui.QPainter(pixmapNew)
+
+                # draw base resolution box
+                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 5.0, QtCore.Qt.PenStyle.DashDotLine))
                 self.baserect = QtCore.QRect(0, 0, int(bw), int(bh))
                 curpos = QtGui.QCursor.pos()
                 transcurpos = self.mapFromGlobal(curpos) / self.ratio
                 scaledrect = QtCore.QRect(self.baserect.topLeft(), self.baserect.bottomRight())
                 scaledrect.moveCenter(transcurpos)
-                painter.setPen(QtGui.QPen(QtGui.QColor("grey"),4.0))
                 painter.drawRect(scaledrect)
                 
+                # draw crop bound box
+                painter.setPen(QtGui.QPen(color, 10.0, QtCore.Qt.PenStyle.DashLine))
                 self.baserect = QtCore.QRect(0, 0, int(bw), int(bh))
                 scaledrect = QtCore.QRect(self.baserect.topLeft()*self.cropscale, self.baserect.bottomRight()*self.cropscale)
                 scaledrect.moveCenter(transcurpos)
-                painter.setPen(QtGui.QPen(color,8.0))
                 painter.drawRect(scaledrect)
+                
+                # draw crosshair
+                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 5.0, QtCore.Qt.PenStyle.DashDotLine))
+                p1 = (scaledrect.topLeft() + scaledrect.bottomLeft())/2
+                p2 = (scaledrect.topRight() + scaledrect.bottomRight())/2
+                painter.drawLine(p1, p2)
+                p1 = (scaledrect.topLeft() + scaledrect.topRight())/2
+                p2 = (scaledrect.bottomLeft() + scaledrect.bottomRight())/2
+                painter.drawLine(p1, p2)
+
                 self.baserect = scaledrect
                 self.pixmapShow = pixmapNew.scaled (round(pixmapNew.width()*self.ratio), round(pixmapNew.height()*self.ratio), QtCore.Qt.KeepAspectRatio)
                 painter.end()
-            self.displayPixmap(self.pixmapShow)
+            self.redisplayPixmap(self.pixmapShow)
 
     def saveCrop(self, bw, bh, fn):
         # crop is extracted and resized to dimension then saved
+        # TODO: fill mode of extending past borders
         if self.baserect:
             fileName = "out/" + str(fn) + ".png"
             if not os.path.exists("out"):
@@ -148,13 +172,18 @@ class PhotoWidget(QtWidgets.QLabel):
             newRect = self.baserect
             newRect.moveTopLeft(newRect.topLeft() + QtCore.QPoint(w, h))
 
-            pixmapCropped = pixmapTrans.copy(newRect)
+            ax, ay = np.max([w, newRect.topLeft().x()]), np.max([h, newRect.topLeft().y()])
+            bx, by = np.min([2*w, newRect.bottomRight().x()]), np.min([2*h, newRect.bottomRight().y()])
+            nbw, nbh = bx-ax, by-ay
+            print (ax-w, ay-h, bx-w, by-h)
+            #pixmapCropped = pixmapTrans.copy(newRect)
+            pixmapCropped = pixmapTrans.copy(ax, ay, nbw, nbh)
             # pixmapCropped = pixmapCropped.scaled(bw, bh) # TODO better scaling?
             pixmapCropped.save(fileName, "PNG")
 
             # reopen file to scale with opencv
             img = cv2.imread(fileName)
-            resized = cv2.resize(img, (bw, bh))
+            resized = cv2.resize(img, (nbw, nbh))
             cv2.imwrite(fileName, resized)
 
     def setMousePressEvent(self, newpMPE):
@@ -206,25 +235,46 @@ class uiMainWindow(QtCore.QObject):
             self.updateCropBox(QtGui.QColor("red"))
             self.saveCrop()
         elif event.buttons() == QtCore.Qt.RightButton:
-            self.updateCropBox(QtGui.QColor("blue"))
-            self.saveCrop()
+            self.nextImg()
 
     def photoMouseMoveEvent(self, event):
         if event.buttons() == QtCore.Qt.NoButton:
             self.updateCropBox()
 
     def photoMouseWheelEvent(self, event):
-        adj = (event.angleDelta().y() / 120) * 0.1
-        self.photo.cropscale += -adj
-        self.photo.cropscale = max(1.0, self.photo.cropscale)
-        self.updateCropBox()
+        ControlState = QtWidgets.QApplication.keyboardModifiers() == QtCore.Qt.ControlModifier
+        if ControlState == False:
+            adj = (event.angleDelta().y() / 120) * 0.1
+            self.photo.cropscale += -adj
+            self.photo.cropscale = max(1.0, self.photo.cropscale)
+            self.updateCropBox()
+        elif ControlState == True:
+            # TODO: set crop angle
+            self.updateCropBox()
 
     def setStatusLabel(self, text):
         self.statusLabel.setText(text)
 
-    def displayImg(self):
-        if (self.selectedFiles and self.curImgIdx >= 0 and self.curImgIdx <= len(self.selectedFiles)):
-            self.photo.displayImg(self.selectedFiles[self.curImgIdx])
+    def getPixmapFromIdx(self, idx):
+        imgPath = self.selectedFiles[idx]
+        pixmapImg = None
+        if (len(imgPath) >= 4 and (imgPath[-4:].lower() == ".cr2")):
+            # process raw photo to pixmap
+            with rawpy.imread(imgPath) as raw:
+                nparrRGB = raw.postprocess()
+                h, w, c = nparrRGB.shape
+                bytesPerLine = 3 * w
+                pixmapImg = QtGui.QImage(nparrRGB.data, w, h, bytesPerLine, QtGui.QImage.Format_RGB888)
+                pixmapImg = QtGui.QPixmap(pixmapImg)
+        else:
+            pixmapImg = QtGui.QPixmap(imgPath)
+        return pixmapImg
+
+    def displayMainImg(self):
+        idx = self.curImgIdx
+        if (self.selectedFiles and idx >= 0 and idx <= len(self.selectedFiles)):
+            pixmapImg = self.getPixmapFromIdx(idx)
+            self.photo.displayPixmap(pixmapImg)
             self.leftForm.slider.setValue(round(self.photo.ratio * 100))
 
     def resetCropscale(self):
@@ -243,6 +293,8 @@ class uiMainWindow(QtCore.QObject):
             fn = self.outname.text()
             self.outname.setText(str(int(self.outname.text())+1))
         self.photo.saveCrop(bw, bh, fn)
+        if self.leftForm.checkClickNext.isChecked():
+            self.nextImg()
         
     def setupUi(self, MainWindow):
         self.mainWindow = MainWindow
@@ -307,29 +359,40 @@ class uiMainWindow(QtCore.QObject):
         # self.displayImg("imgs/dog.jpg")
         # self.cat.setText(_translate("MainWindow", "CAT"))
         # self.dog.setText(_translate("MainWindow", "DOG"))
+    
+    def updateGalleryIdx(self):
+        idx = self.curImgIdx
+        return
+
+    def updateGallery(self):
+        self.updateGalleryIdx()
+        return
 
     def select_photos(self):
         dialogDirImg = QtWidgets.QFileDialog(None)
         dialogDirImg.setFileMode(QtWidgets.QFileDialog.ExistingFiles)
-        dialogDirImg.setNameFilters(["Images (*.png *.xpm *.jpg)", "[Any (*)"])
+        dialogDirImg.setNameFilters(["Images (*.png *.xpm *.jpg *.cr2)", "Any (*)"])
         if dialogDirImg.exec():
             self.selectedFiles = dialogDirImg.selectedFiles()
             if self.selectedFiles:
                 print (self.selectedFiles)
                 self.curImgIdx = 0
-                self.displayImg()
+                self.displayMainImg()
                 self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
+                self.updateGallery()
 
     def prevImg(self):
         if self.curImgIdx > 0:
             self.curImgIdx -= 1
-            self.displayImg()
+            self.displayMainImg()
             self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
+            self.updateGalleryIdx()
     def nextImg(self):
         if (self.selectedFiles and self.curImgIdx + 1 < len(self.selectedFiles)):
             self.curImgIdx += 1
-            self.displayImg()
+            self.displayMainImg()
             self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
+            self.updateGalleryIdx()
 
     def changeZoom(self):
         self.photo.ratio = self.leftForm.slider.value() / 100.0
