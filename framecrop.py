@@ -1,7 +1,9 @@
+# Author: Tony Sun
+
 import sys
 import os
 import rawpy
-import time
+#import uuid
 
 from pathlib import Path
 
@@ -49,7 +51,7 @@ class QSAPhotoGallery(QtWidgets.QScrollArea):
         imgPath = path
         pixmapImg = None
 
-        if (len(imgPath) >= 4 and (imgPath[-4:].lower() == ".cr2")):
+        if (len(imgPath) >= 4 and ((imgPath[-4:].lower() == ".cr2") or (imgPath[-4:].lower() == ".cr3"))):
             with rawpy.imread(imgPath) as raw:
                 try:
                     thumb = raw.extract_thumb()
@@ -216,8 +218,6 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.addLayout(self.galleryForm, 1)
 
 class RightToolBox(QtWidgets.QVBoxLayout):
-    # TODO: add delete button
-
     hxItems = {}
 
     def __init__(self):
@@ -265,18 +265,25 @@ class RightToolBox(QtWidgets.QVBoxLayout):
         self.photos.append(photo)
         self.history.insertRow(1, photo)
 
-        self.text = QtWidgets.QLabel()
-        self.text.setText(fname)
+        # self.text = QtWidgets.QLabel()
+        # self.text.setText(fname)
 
         deleteImg = QtWidgets.QPushButton()
         deleteImg.setObjectName("delimg"+fname)
         deleteImg.setText("Delete")
         deleteImg.clicked.connect(lambda: self.delFile(fname))
-        self.history.insertRow(2, self.text, deleteImg)
-        self.hxItems[fname] = [photo, self.text, deleteImg]
+        self.history.insertRow(2, fname, deleteImg)
+        self.hxItems[fname] = [photo, fname, deleteImg]
 
     def delFile(self, fname):
-        return
+        #print("trying to delete " + fname)
+        if os.path.isfile(fname):
+            os.remove(fname)
+            print("deleted " + fname)
+            # remove this from history
+            wP, t, wB = self.hxItems[fname]
+            self.history.removeRow(wP)
+            self.history.removeRow(wB)
         
 
 class PhotoWidget(QtWidgets.QLabel):
@@ -317,7 +324,7 @@ class PhotoWidget(QtWidgets.QLabel):
         self.ratio = newPixmapShow.width() / self.pixmapImg.width()
         self.redisplayPixmap(newPixmapShow)
 
-    def updateCropBox(self, bw, bh, color = QtGui.QColor("green")):
+    def updateCropBox(self, bw, bh, ratio, color = QtGui.QColor("green")):
         # add cropping box to photo, photo is scaled to recorded ratio
         if (self.pixmapImg):
             pixmapNew = self.pixmapImg.copy()
@@ -326,7 +333,7 @@ class PhotoWidget(QtWidgets.QLabel):
                 painter = QtGui.QPainter(pixmapNew)
 
                 # draw base resolution box
-                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 5.0, QtCore.Qt.PenStyle.DashDotLine))
+                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 2/ratio, QtCore.Qt.PenStyle.DashDotLine))
                 self.baserect = QtCore.QRect(0, 0, int(bw), int(bh))
                 curpos = QtGui.QCursor.pos()
                 transcurpos = self.mapFromGlobal(curpos) / self.ratio
@@ -340,7 +347,7 @@ class PhotoWidget(QtWidgets.QLabel):
                 painter.drawPolygon(transformedPolygon)
                 
                 # draw crop bound box
-                painter.setPen(QtGui.QPen(color, 10.0, QtCore.Qt.PenStyle.DashLine))
+                painter.setPen(QtGui.QPen(color, 2/ratio, QtCore.Qt.PenStyle.DashLine))
                 # transform cropping box
                 transform = QtGui.QTransform()
                 transform.translate(transcurpos.x(), transcurpos.y())
@@ -351,7 +358,7 @@ class PhotoWidget(QtWidgets.QLabel):
                 painter.drawPolygon(transformedPolygon)
                 
                 # draw crosshair
-                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 5.0, QtCore.Qt.PenStyle.DashDotLine))
+                painter.setPen(QtGui.QPen(QtGui.QColor("grey"), 2/ratio, QtCore.Qt.PenStyle.DashDotLine))
                 p1 = transform.map((self.baserect.topLeft() + self.baserect.bottomLeft())/2)
                 p2 = transform.map((self.baserect.topRight() + self.baserect.bottomRight())/2)
                 painter.drawLine(p1, p2)
@@ -408,13 +415,13 @@ class PhotoWidget(QtWidgets.QLabel):
                 return pt
             rectPt = np.array([ [[a.x(), a.y()]], [[b.x(), b.y()]], [[c.x(), c.y()]], [[d.x(), d.y()]] ])
             rect = cv2.minAreaRect(rectPt)
-            print("shape of rect: {}".format(rect))
+            #print("shape of rect: {}".format(rect))
 
             box = cv2.boxPoints(rect)
             box = np.int0(box)
 
-            print("bounding box: {}".format(box))
-            cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
+            #print("bounding box: {}".format(box))
+            #cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
 
             # get width and height of the detected rectangle
             width = int(rect[1][0])
@@ -433,20 +440,17 @@ class PhotoWidget(QtWidgets.QLabel):
 
             # directly warp the rotated rectangle to get the straightened rectangle
             warped = cv2.warpPerspective(img, M, (width, height))
-            if self.rotAngle <= 0:
+            if self.rotAngle < 1e-6:
                 warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
 
-            fmulti = 1
-            if RUN_FREE:
-                fmulti = 0.1
             nmulti = 200/bw
-            nbw, nbh = int(nmulti * bw *fmulti), int(nmulti * bh * fmulti)
+            nbw, nbh = int(nmulti * bw), int(nmulti * bh)
 
             thumbImg = cv2.resize(warped, (nbw, nbh))
             #cv2.imshow("Cropped", thumbImg)
             cv2.imwrite(fileName, warped, [cv2.IMWRITE_JPEG_QUALITY, compressLvl])
 
-            return thumbImg
+            return thumbImg, fileName
 
             def addBlackBorder():
                 pixmapTrans = QtGui.QPixmap(w*3, h*3)
@@ -513,8 +517,8 @@ class uiMainWindow(QtCore.QObject):
     def photoMousePressEvent(self, event):
         if event.buttons() == QtCore.Qt.MouseButton.LeftButton:
             self.updateCropBox(QtGui.QColor("red"))
-            thumbImg, fname = self.saveCrop()
-            self.rightForm.addEntry(thumbImg, fname)
+            thumbImg, fnamext = self.saveCrop()
+            self.rightForm.addEntry(thumbImg, fnamext)
         elif event.buttons() == QtCore.Qt.MouseButton.RightButton:
             self.nextImg()
 
@@ -542,7 +546,7 @@ class uiMainWindow(QtCore.QObject):
     def getPixmapFromIdx(self, idx):
         imgPath = self.selectedFiles[idx]
         pixmapImg = None
-        if (len(imgPath) >= 4 and (imgPath[-4:].lower() == ".cr2")):
+        if (len(imgPath) >= 4 and ((imgPath[-4:].lower() == ".cr2") or (imgPath[-4:].lower() == ".cr3"))):
             # process raw photo to pixmap
             with rawpy.imread(imgPath) as raw:
                 nparrRGB = raw.postprocess()
@@ -568,7 +572,7 @@ class uiMainWindow(QtCore.QObject):
     def updateCropBox(self, color = QtGui.QColor("green")):
         bw = int(self.leftForm.outwidth.text())
         bh = int(self.leftForm.outheight.text())
-        self.photo.updateCropBox(bw, bh, color)
+        self.photo.updateCropBox(bw, bh, self.photo.ratio, color)
 
     def saveCrop(self, fn = 0):
         bw = int(self.leftForm.outwidth.text())
@@ -576,13 +580,13 @@ class uiMainWindow(QtCore.QObject):
         if fn == 0:
             fn = self.outname.text()
             self.outname.setText(str(int(self.outname.text())+1))
-        thumbImg = self.photo.saveCrop(bw, bh, fn)
+        thumbImg, fnamext = self.photo.saveCrop(bw, bh, fn)
         if self.leftForm.checkClickNext.isChecked():
             self.nextImg()
-        return thumbImg, fn
-        #time.sleep(np.random.rand()*1 + np.random.rand()*1 + np.random.rand()*1 + np.random.rand()*1 + np.random.rand()*1 + np.random.rand()*1)
+        return thumbImg, fnamext
 
     def setupUi(self, MainWindow):
+        
         self.mainWindow = MainWindow
         MainWindow.setObjectName("mainwindow")
         MainWindow.resize(1600, 900)
@@ -621,18 +625,25 @@ class uiMainWindow(QtCore.QObject):
         self.menubar = QtWidgets.QMenuBar(MainWindow)
         self.menubar.setObjectName("menubar")
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1600, 21))
-        fmenu = self.menubar.addMenu('File')
-        action = fmenu.addAction('Select files')
-        action.triggered.connect(self.selectPhotos)
+        # fmenu = self.menubar.addMenu('File')
+        # action = fmenu.addAction('Select files')
+        # action.triggered.connect(self.selectPhotos)
         MainWindow.setMenuBar(self.menubar)
         ## MENU DEBUG
         action = self.menubar.addAction('Select files')
         action.triggered.connect(self.selectPhotos)
+        action = self.menubar.addAction('Usage tips')
+        action.triggered.connect(self.showTips)
 
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
         self.statusbar.setObjectName("statusbar")
         self.statusbar.setGeometry(QtCore.QRect(0, 0, 1600, 21))
         MainWindow.setStatusBar(self.statusbar)
+
+        self.outnameLabel = QtWidgets.QLabel()
+        self.outnameLabel.setObjectName("outnameLabel")
+        self.outnameLabel.setText("Output filename (number only):")
+        self.statusbar.addWidget(self.outnameLabel)
 
         self.outname = QtWidgets.QLineEdit()
         self.outname.setObjectName("outname")
@@ -642,13 +653,18 @@ class uiMainWindow(QtCore.QObject):
 
         self.statusLabel = QtWidgets.QLabel()
         self.statusLabel.setObjectName("statusLabel")
-        self.setStatusLabel("Scroll wheel with and without control to control crop, left click to crop, right click for next. Email Tony - quansa.sun@gmail.com for troubleshooting.")
-        self.statusbar.addWidget(self.statusLabel)
+        self.statusLabel.setText("Scroll wheel +/- ctrl to select, left click to crop, right click for next. Contact Tony Sun (PROS) for assistance.")
+        self.statusLabel.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self.statusbar.addPermanentWidget(self.statusLabel, 0)
 
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
-
+        if RUN_FREE:
+            #mac_address = uuid.getnode()
+            answer, done = QtWidgets.QInputDialog.getText(MainWindow, "Input Dialog", "Enter the best dental speciality (enter unlock key to skip this):")
+            if (not done) or (answer[:4].lower() != "pros"):
+                sys.exit()
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -669,7 +685,7 @@ class uiMainWindow(QtCore.QObject):
     def selectPhotos(self):
         dialogDirImg = QtWidgets.QFileDialog(None)
         dialogDirImg.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFiles)
-        dialogDirImg.setNameFilters(["Images (*.png *.xpm *.jpg *.cr2)", "Any (*)"])
+        dialogDirImg.setNameFilters(["Images (*.png *.xpm *.jpg *.cr2 *.cr3)", "Any (*)"])
         if dialogDirImg.exec():
             self.selectedFiles = dialogDirImg.selectedFiles()
             if self.selectedFiles:
@@ -679,13 +695,13 @@ class uiMainWindow(QtCore.QObject):
                 self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
                 self.updateGallery()
                 self.leftForm.setGallery(self.selectedFiles)
-
-    def debugPhoto(self):
-        self.selectedFiles = ["C:/Users/quans/OneDrive/Documents/code/framecrop/dataset/img1.jpg"]
-        self.curImgIdx = 0
-        self.displayMainImg()
-        self.leftForm.updateIdx(self.curImgIdx, len(self.selectedFiles))
-        self.updateGallery()
+    
+    def showTips(self):
+        # show pop up on usage tips
+        tipsWindow = QtWidgets.QMessageBox()
+        tipsWindow.setWindowTitle("Usage Tips")
+        tipsWindow.setText("Select cropping ratio and use CW/CCW mirror for orientation.\nScroll wheel +/- ctrl to select crop box.\nLeft click to crop, right click for next.")
+        tipsWindow.exec()
 
     def toImgIdx(self, idx):
         if (self.curImgIdx < 0 or self.curImgIdx >= len(self.selectedFiles)):
@@ -741,11 +757,9 @@ class uiMainWindow(QtCore.QObject):
         self.updateCropBox()
 
 if __name__ == "__main__":
-    import sys
     app = QtWidgets.QApplication(sys.argv)
     MainWindow = QtWidgets.QMainWindow()
     ui = uiMainWindow()
     ui.setupUi(MainWindow)
-    #ui.debugPhoto()
     MainWindow.show()
     sys.exit(app.exec())
