@@ -14,10 +14,13 @@ Requirements
 # Installation
 Install python and requirements
 1. Install python [python.org](https://www.python.org/downloads/)
-2. In powershell/CMD/Terminal run:
+   - Make sure you tick add to environment variable on windows
+3. In powershell/CMD/Terminal run:
  - `pip install numpy`
  - `pip install pyside6`
  - `pip install opencv-python`
+ - `pip install rawpy`
+ - `pip install PyQt6`
 
 # Usage
 In powershell/CMD/Terminal navigate to the location of framecrop.py
