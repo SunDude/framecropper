@@ -31,4 +31,4 @@ run the sript
  2. Select files to crop from top left (can select multiple)
  3. Select ratio of descired output
  4. Use mouse + mousewheel to define crop, left click to crop
- 5. Output files saved to out folder starting from 0 (manually adjust this bottom left)
+ 5. Output files saved to /out folder starting from 0 (manually adjust this bottom left)
