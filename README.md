@@ -2,10 +2,11 @@
 python quick crop tool
 
 Requirements
+ - Python 3+
  - Numpy
  - Qt6
  - OpenCV
- - Python 3+
+ - rawpy
  - Mouse with left click and scroll wheel
 
 # Screenshot
