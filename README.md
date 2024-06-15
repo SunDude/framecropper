@@ -1,5 +1,8 @@
 # framecropper
 python quick crop tool
+Enables quick rotation, mirror, brightness/contrast, and then cropping of photos
+Input can be raw images in CR2/CR3 format or JPEG/PNG/etc.
+Output in .jpg (change default parameters in saveCrop function for different filetype/compression)
 
 Requirements
  - Python 3+
