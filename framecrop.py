@@ -166,24 +166,18 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.nav = QtWidgets.QFormLayout()
         self.nav.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
 
-        self.imgidxtext = QtWidgets.QLabel()
-        self.imgidxtext.setText(str(self.idx) + " / " + str(self.len))
-        self.checkClickNext = QtWidgets.QCheckBox()
-        self.checkClickNext.setText("Click -> Next")
+        self.imgidxtext = QtWidgets.QLabel(str(self.idx) + " / " + str(self.len))
+        self.checkClickNext = QtWidgets.QCheckBox("Click -> Next")
         self.checkClickNext.setCheckState(QtCore.Qt.CheckState.Unchecked)
         self.nav.addRow(self.imgidxtext, self.checkClickNext)
 
-        self.prev = QtWidgets.QPushButton()
-        self.prev.setText("Prev")
-        self.next = QtWidgets.QPushButton()
-        self.next.setText("Next")
+        self.prev = QtWidgets.QPushButton("Prev")
+        self.next = QtWidgets.QPushButton("Next")
         self.nav.addRow(self.prev, self.next)
-        self.resetImg = QtWidgets.QPushButton()
-        self.resetImg.setText("Reset")
+        self.resetImg = QtWidgets.QPushButton("Reset")
         self.nav.addRow(self.resetImg)
         
-        self.sliderLabel = QtWidgets.QLabel()
-        self.sliderLabel.setText("Image Zoom")
+        self.sliderLabel = QtWidgets.QLabel("Image Zoom")
         self.nav.addRow(self.sliderLabel)
         self.slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.slider.setPageStep(0)
@@ -205,6 +199,23 @@ class LeftToolBox(QtWidgets.QVBoxLayout):
         self.mirrorhori = QtWidgets.QPushButton()
         self.mirrorhori.setText("Mirror |")
         self.nav.addRow(self.mirrorvert, self.mirrorhori)
+
+        self.labelB = QtWidgets.QLabel("Bright")
+        self.labelC = QtWidgets.QLabel("Contrast")
+        self.nav.addRow(self.labelB, self.labelC)
+        self.sliderBright = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.sliderBright.setMinimum(-100)
+        self.sliderBright.setMaximum(100)
+        self.sliderBright.setValue(0)
+        self.sliderBright.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.sliderBright.setTickInterval(25)
+        self.sliderCont = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.sliderCont.setMinimum(-100)
+        self.sliderCont.setMaximum(100)
+        self.sliderCont.setValue(0)
+        self.sliderCont.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
+        self.sliderCont.setTickInterval(25)
+        self.nav.addRow(self.sliderBright, self.sliderCont)
 
         self.galleryForm = QtWidgets.QFormLayout()
         self.galleryForm.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
@@ -298,6 +309,9 @@ class PhotoWidget(QtWidgets.QLabel):
         self.rotAngle = -1e-6
         self.transform = QtGui.QTransform()
 
+        self.brightness = 0
+        self.contrast = 0
+
         self.pMME = 0
         self.pMPE = 0
         self.pMWE = 0
@@ -313,21 +327,53 @@ class PhotoWidget(QtWidgets.QLabel):
         self.setPixmap(pmap)
         self.pixmapShow = pmap
 
-    def displayPixmap(self, pixmap):
+    def apply_brightness_contrast(self, input_img, brightness = 0, contrast = 0):
+        if brightness != 0:
+            if brightness > 0:
+                shadow = brightness
+                highlight = 255
+            else:
+                shadow = 0
+                highlight = 255 + brightness
+            alpha_b = (highlight - shadow)/255
+            gamma_b = shadow
+            
+            buf = cv2.addWeighted(input_img, alpha_b, input_img, 0, gamma_b)
+        else:
+            buf = input_img.copy()
+        
+        if contrast != 0:
+            f = 131*(contrast + 127)/(127*(131-contrast))
+            alpha_c = f
+            gamma_c = 127*(1-f)
+            
+            buf = cv2.addWeighted(buf, alpha_c, buf, 0, gamma_c)
+
+        return buf
+
+    def displayPixmap(self, pixmap, setProp=False):
         # load new pixmap, using filepath scale image to window size and display it, record ratio of scaling
-        self.transform = QtGui.QTransform() # reset transform
-        self.pixmapImg = pixmap.copy()
-        self.basePixmapImg = pixmap.copy()
-        newPixmapShow = self.pixmapImg.copy()
-        if (self.width() < self.pixmapImg.width() or self.height() < self.pixmapImg.height()):
-            newPixmapShow = newPixmapShow.scaled (self.width(), self.height(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
-        self.ratio = newPixmapShow.width() / self.pixmapImg.width()
-        self.redisplayPixmap(newPixmapShow)
+        # call with pixmap = self.basePixmapImg and setProp = True if changing contrast
+        if (pixmap):
+            if (setProp == False):
+                self.transform = QtGui.QTransform() # reset transform
+                self.basePixmapImg = pixmap.copy()
+            self.pixmapImg = pixmap.copy()
+            cv2mat = self.convertQPixmapToMat(self.pixmapImg)
+            cv2mat = self.apply_brightness_contrast(cv2mat, self.brightness, self.contrast)
+            self.pixmapImg = self.convertMatToQPixmap(cv2mat)
+
+            newPixmapShow = self.pixmapImg#.copy() # is this optional?
+            if (self.width() < self.pixmapImg.width() or self.height() < self.pixmapImg.height()):
+                newPixmapShow = newPixmapShow.scaled (self.width(), self.height(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+            self.ratio = newPixmapShow.width() / self.pixmapImg.width()
+            self.redisplayPixmap(newPixmapShow)
 
     def updateCropBox(self, bw, bh, ratio, color = QtGui.QColor("green")):
         # add cropping box to photo, photo is scaled to recorded ratio
+        # TODO: change drawn box onto a new transparent layer over the photo
         if (self.pixmapImg):
-            pixmapNew = self.pixmapImg.copy()
+            pixmapNew = self.pixmapImg #.copy() # apparently this copy is not needed and only makes it run very slow
             pixmapNew = pixmapNew.transformed(self.transform)
             if pixmapNew:
                 painter = QtGui.QPainter(pixmapNew)
@@ -393,6 +439,11 @@ class PhotoWidget(QtWidgets.QLabel):
         return arr
         arr = np.array(ptr).reshape(height, width, 4)  #  Copies the data
         return arr
+    
+    def convertMatToQPixmap(self, cv2mat):
+        height, width, channel = cv2mat.shape
+        bytesPerLine = 3 * width
+        return QtGui.QPixmap.fromImage(QtGui.QImage(cv2mat.data, width, height, bytesPerLine, QtGui.QImage.Format.Format_RGB888).rgbSwapped())
 
     def saveCrop(self, bw, bh, fn, otype=".jpg", compressLvl=80):
         ''' Saves selected crop, takes auguments width/height, output file name, output file type, compression level [0-100]'''
@@ -434,13 +485,17 @@ class PhotoWidget(QtWidgets.QLabel):
                                 [0, 0],
                                 [width-1, 0],
                                 [width-1, height-1]], dtype="float32")
+            
+            print(dst_pts)
 
             # the perspective transformation matrix
             M = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
             # directly warp the rotated rectangle to get the straightened rectangle
             warped = cv2.warpPerspective(img, M, (width, height))
-            if self.rotAngle < 1e-6:
+            print(self.rotAngle)
+            if self.rotAngle < -9e-7:
+                print("rotating")
                 warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
 
             nmulti = 200/bw
@@ -495,6 +550,11 @@ class PhotoWidget(QtWidgets.QLabel):
     
     def transformImg(self, transform):
         self.transform *= transform
+    
+    def updateProps(self, valB, valC):
+        self.brightness=valB
+        self.contrast=valC
+        self.displayPixmap(self.basePixmapImg, True)
 
 class uiMainWindow(QtCore.QObject):
     curImgIdx = -1
@@ -568,6 +628,9 @@ class uiMainWindow(QtCore.QObject):
     def resetImg(self):
         self.photo.resetImg()
         self.updateCropBox()
+        self.leftForm.sliderBright.setValue(0)
+        self.leftForm.sliderCont.setValue(0)
+        self.changeImgProp()
 
     def updateCropBox(self, color = QtGui.QColor("green")):
         bw = int(self.leftForm.outwidth.text())
@@ -610,6 +673,8 @@ class uiMainWindow(QtCore.QObject):
         self.leftForm.mirrorvert.clicked.connect(self.mirrorImgV)
         self.leftForm.mirrorhori.clicked.connect(self.mirrorImgH)
         self.leftForm.setGalleryImgIdxCB(self.toImgIdx)
+        self.leftForm.sliderBright.sliderMoved.connect(self.changeImgProp)
+        self.leftForm.sliderCont.sliderMoved.connect(self.changeImgProp)
 
         self.rightForm = RightToolBox()
         self.rightForm.setupUI()
@@ -755,6 +820,13 @@ class uiMainWindow(QtCore.QObject):
         transform.scale(-1, 1)
         self.photo.transformImg(transform)
         self.updateCropBox()
+
+    def changeImgProp(self):
+        valB = self.leftForm.sliderBright.value()
+        valC = self.leftForm.sliderCont.value()
+        
+        self.photo.updateProps(valB, valC)
+
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
