@@ -7,7 +7,7 @@ import rawpy
 
 from pathlib import Path
 
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 import numpy as np
 
 import cv2
@@ -111,7 +111,7 @@ class QSAPhotoGallery(QtWidgets.QScrollArea):
             self.selectImg[idx] = QtWidgets.QPushButton()
             self.selectImg[idx].setObjectName("imgsel"+str(idx))
             self.selectImg[idx].setText(fname)
-            self.selectImg[idx].clicked.connect(lambda state, i=idx: self.pTII(i))
+            self.selectImg[idx].clicked.connect(lambda state=True, i=idx: self.pTII(i))
             self.gallery.addRow(self.selectImg[idx])
     
 
@@ -306,7 +306,7 @@ class PhotoWidget(QtWidgets.QLabel):
         self.baserect = 0
         self.cropscale = 1.0
         self.ratio = 1.0
-        self.rotAngle = -1e-6
+        self.rotAngle = 1e-6
         self.transform = QtGui.QTransform()
 
         self.brightness = 0
@@ -320,7 +320,7 @@ class PhotoWidget(QtWidgets.QLabel):
 
     def resetImg(self):
         self.cropscale = 1.0
-        self.rotAngle = -1e-6
+        self.rotAngle = 1e-6
         self.transform = QtGui.QTransform()
 
     def redisplayPixmap(self, pmap):
@@ -328,6 +328,7 @@ class PhotoWidget(QtWidgets.QLabel):
         self.pixmapShow = pmap
 
     def apply_brightness_contrast(self, input_img, brightness = 0, contrast = 0):
+        # https://stackoverflow.com/questions/39308030/how-do-i-increase-the-contrast-of-an-image-in-python-opencv
         if brightness != 0:
             if brightness > 0:
                 shadow = brightness
@@ -350,6 +351,15 @@ class PhotoWidget(QtWidgets.QLabel):
             buf = cv2.addWeighted(buf, alpha_c, buf, 0, gamma_c)
 
         return buf
+    
+    def autoWhiteBalance(self, img):
+        result = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        avg_a = np.average(result[:, :, 1])
+        avg_b = np.average(result[:, :, 2])
+        result[:, :, 1] = result[:, :, 1] - ((avg_a - 128) * (result[:, :, 0] / 255.0) * 1.1)
+        result[:, :, 2] = result[:, :, 2] - ((avg_b - 128) * (result[:, :, 0] / 255.0) * 1.1)
+        result = cv2.cvtColor(result, cv2.COLOR_LAB2RGB)
+        return result
 
     def displayPixmap(self, pixmap, setProp=False):
         # load new pixmap, using filepath scale image to window size and display it, record ratio of scaling
@@ -360,6 +370,7 @@ class PhotoWidget(QtWidgets.QLabel):
                 self.basePixmapImg = pixmap.copy()
             self.pixmapImg = pixmap.copy()
             cv2mat = self.convertQPixmapToMat(self.pixmapImg)
+            cv2mat = self.autoWhiteBalance(cv2mat)
             cv2mat = self.apply_brightness_contrast(cv2mat, self.brightness, self.contrast)
             self.pixmapImg = self.convertMatToQPixmap(cv2mat)
 
@@ -432,7 +443,7 @@ class PhotoWidget(QtWidgets.QLabel):
         height = incomingImage.height()
 
         ptr = incomingImage.bits()
-        ptr.setsize(incomingImage.sizeInBytes())
+        # ptr.setsize(incomingImage.sizeInBytes())
 
         arr = np.array(ptr, copy=True).reshape(height, width, 4)
         arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
@@ -459,7 +470,7 @@ class PhotoWidget(QtWidgets.QLabel):
             transformedPixmapImg = self.pixmapImg.transformed(self.transform)
             img = self.convertQPixmapToMat(transformedPixmapImg)
 
-            a,b,c,d = self.baserect.point(0), self.baserect.point(1), self.baserect.point(2), self.baserect.point(3)
+            a,b,c,d = self.baserect.at(0), self.baserect.at(1), self.baserect.at(2), self.baserect.at(3)
             def limitPt(pt, small, big):
                 pt.setX(np.min([np.max([pt.x(), small]), big]))
                 pt.setY(np.min([np.max([pt.y(), small]), big]))
@@ -469,7 +480,7 @@ class PhotoWidget(QtWidgets.QLabel):
             #print("shape of rect: {}".format(rect))
 
             box = cv2.boxPoints(rect)
-            box = np.int0(box)
+            box = np.intp(box)
 
             #print("bounding box: {}".format(box))
             #cv2.drawContours(img, [box], 0, (0, 0, 255), 2)
@@ -494,7 +505,7 @@ class PhotoWidget(QtWidgets.QLabel):
             # directly warp the rotated rectangle to get the straightened rectangle
             warped = cv2.warpPerspective(img, M, (width, height))
             print(self.rotAngle)
-            if self.rotAngle < -9e-7:
+            if self.rotAngle < 1e-1:
                 print("rotating")
                 warped = cv2.rotate(warped, cv2.ROTATE_90_CLOCKWISE)
 
@@ -596,8 +607,10 @@ class uiMainWindow(QtCore.QObject):
         elif ControlState == True:
             # TODO: set crop angle
             self.photo.rotAngle += adj * 16
-            self.photo.rotAngle = min(40, self.photo.rotAngle)
-            self.photo.rotAngle = max(-40, self.photo.rotAngle)
+            self.photo.rotAngle = min(85, self.photo.rotAngle)
+            self.photo.rotAngle = max(-85, self.photo.rotAngle)
+            if (np.abs(self.photo.rotAngle) < 1e-64):
+                self.photo.rotAngle = 1e-6
             self.updateCropBox()
 
     def setStatusLabel(self, text):
@@ -750,6 +763,10 @@ class uiMainWindow(QtCore.QObject):
     def selectPhotos(self):
         dialogDirImg = QtWidgets.QFileDialog(None)
         dialogDirImg.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFiles)
+        docLoc = QtCore.QDir(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation))
+        f2023AbsPath = docLoc.absoluteFilePath("DCD/Cases/2023")
+        if self.selectedFiles == 0:
+            dialogDirImg.setDirectory(f2023AbsPath)
         dialogDirImg.setNameFilters(["Images (*.png *.xpm *.jpg *.cr2 *.cr3)", "Any (*)"])
         if dialogDirImg.exec():
             self.selectedFiles = dialogDirImg.selectedFiles()
